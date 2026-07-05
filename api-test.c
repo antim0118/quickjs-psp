@@ -914,7 +914,7 @@ static void immutable_array_buffer(void)
     JSValue obj, ret;
     bool immutable;
     char buf[96];
-    int i, v;
+    int i; int32_t v;
 
     JSRuntime *rt = new_runtime();
     JSContext *ctx = JS_NewContext(rt);

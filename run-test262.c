@@ -556,6 +556,8 @@ static long cpu_count(void)
         for (i = 0; i < 8 * sizeof(procmask); i++)
             count += 1 & (procmask >> i);
     return count;
+#elif defined(__PSP__)
+    return 1;
 #else
     return sysconf(_SC_NPROCESSORS_ONLN);
 #endif

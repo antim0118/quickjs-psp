@@ -56,14 +56,18 @@
 #define getcwd _getcwd
 #define chdir _chdir
 #else
+#if !defined(__PSP__)
 #include <sys/ioctl.h>
+#endif
+#if !defined(__PSP__)
 #include <poll.h>
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
 #include <dlfcn.h>
 #include <termios.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <grp.h>
+#endif
 #endif
 
 #if defined(__APPLE__)
@@ -685,7 +689,14 @@ static JSModuleDef *js_module_loader_so(JSContext *ctx,
     JS_ThrowReferenceError(ctx, "shared library modules are not supported yet");
     return NULL;
 }
-#else
+#elif defined(__PSP__)
+static JSModuleDef *js_module_loader_so(JSContext *ctx,
+                                        const char *module_name)
+{
+    JS_ThrowReferenceError(ctx, "shared library modules are not supported on PSP");
+    return NULL;
+}
+#else  
 static JSModuleDef *js_module_loader_so(JSContext *ctx,
                                         const char *module_name)
 {
@@ -962,7 +973,7 @@ JSModuleDef *js_module_loader(JSContext *ctx, const char *module_name,
 static JSValue js_std_exit(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    int status;
+    int32_t status;
     if (JS_ToInt32(ctx, &status, argv[0]))
         status = -1;
     exit(status);
@@ -1192,7 +1203,7 @@ static void safe_close(FILE *f, bool is_popen)
     if (is_stdio(f))
         return;
     if (is_popen) {
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
         pclose(f);
 #endif
     } else {
@@ -1220,7 +1231,7 @@ static ssize_t js_get_errno(ssize_t ret)
 static JSValue js_std_strerror(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
 {
-    int err;
+    int32_t err;
     if (JS_ToInt32(ctx, &err, argv[0]))
         return JS_EXCEPTION;
     return JS_NewString(ctx, strerror(err));
@@ -1291,7 +1302,7 @@ static JSValue js_std_open(JSContext *ctx, JSValueConst this_val,
     return JS_EXCEPTION;
 }
 
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
 static JSValue js_std_popen(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -1334,7 +1345,7 @@ static JSValue js_std_fdopen(JSContext *ctx, JSValueConst this_val,
 {
     const char *mode;
     FILE *f;
-    int fd, err;
+    int32_t fd; int err;
 
     if (JS_ToInt32(ctx, &fd, argv[0]))
         return JS_EXCEPTION;
@@ -1441,7 +1452,7 @@ static JSValue js_std_file_close(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "invalid file handle");
     if (is_stdio(s->f))
         return JS_ThrowTypeError(ctx, "cannot close stdio");
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
     if (s->is_popen)
         err = js_get_errno(pclose(s->f));
     else
@@ -1493,7 +1504,7 @@ static JSValue js_std_file_seek(JSContext *ctx, JSValueConst this_val,
 {
     FILE *f = js_std_file_get(ctx, this_val);
     int64_t pos;
-    int whence, ret;
+    int32_t whence; int ret;
     if (!f)
         return JS_EXCEPTION;
     if (JS_ToInt64Ext(ctx, &pos, argv[0]))
@@ -1685,7 +1696,7 @@ static JSValue js_std_file_putByte(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
     FILE *f = js_std_file_get(ctx, this_val);
-    int c;
+    int32_t c;
     if (!f)
         return JS_EXCEPTION;
     if (JS_ToInt32(ctx, &c, argv[0]))
@@ -1695,7 +1706,7 @@ static JSValue js_std_file_putByte(JSContext *ctx, JSValueConst this_val,
 }
 
 /* urlGet */
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
 
 #define URL_GET_PROGRAM "curl -s -i --"
 #define URL_GET_BUF_SIZE 4096
@@ -1922,7 +1933,7 @@ static const JSCFunctionListEntry js_std_funcs[] = {
     JS_CFUNC_DEF("setenv", 1, js_std_setenv ),
     JS_CFUNC_DEF("unsetenv", 1, js_std_unsetenv ),
     JS_CFUNC_DEF("getenviron", 1, js_std_getenviron ),
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
     JS_CFUNC_DEF("urlGet", 1, js_std_urlGet ),
 #endif
     JS_CFUNC_DEF("loadFile", 1, js_std_loadFile ),
@@ -1931,7 +1942,7 @@ static const JSCFunctionListEntry js_std_funcs[] = {
 
     /* FILE I/O */
     JS_CFUNC_DEF("open", 2, js_std_open ),
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
     JS_CFUNC_DEF("popen", 2, js_std_popen ),
     JS_CFUNC_DEF("tmpfile", 0, js_std_tmpfile ),
 #endif
@@ -2011,7 +2022,7 @@ static JSValue js_os_open(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
     const char *filename;
-    int flags, mode, ret;
+    int32_t flags, mode; int ret;
 
     filename = JS_ToCString(ctx, argv[0]);
     if (!filename)
@@ -2040,7 +2051,7 @@ static JSValue js_os_open(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_close(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    int fd, ret;
+    int32_t fd; int ret;
     if (JS_ToInt32(ctx, &fd, argv[0]))
         return JS_EXCEPTION;
     ret = js_get_errno(close(fd));
@@ -2050,7 +2061,7 @@ static JSValue js_os_close(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_seek(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    int fd, whence;
+    int32_t fd, whence;
     int64_t pos, ret;
     bool is_bigint;
 
@@ -2073,7 +2084,7 @@ static JSValue js_os_seek(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_read_write(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv, int magic)
 {
-    int fd;
+    int32_t fd;
     uint64_t pos, len;
     size_t size;
     ssize_t ret;
@@ -2100,7 +2111,7 @@ static JSValue js_os_read_write(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_isatty(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
-    int fd;
+    int32_t fd;
     if (JS_ToInt32(ctx, &fd, argv[0]))
         return JS_EXCEPTION;
     return JS_NewBool(ctx, (isatty(fd) != 0));
@@ -2150,7 +2161,7 @@ static JSValue js_os_ttySetRaw(JSContext *ctx, JSValueConst this_val,
     }
     return JS_UNDEFINED;
 }
-#elif !defined(__wasi__)
+#elif !defined(__wasi__) && !defined(__PSP__)
 static JSValue js_os_ttyGetWinSize(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
@@ -2209,7 +2220,7 @@ static JSValue js_os_ttySetRaw(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-#endif /* !_WIN32 && !__wasi__ */
+#endif /* !_WIN32 && !__wasi__ && !__PSP__ */
 
 static JSValue js_os_remove(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
@@ -2292,7 +2303,7 @@ static JSValue js_os_setReadHandler(JSContext *ctx, JSValueConst this_val,
     JSRuntime *rt = JS_GetRuntime(ctx);
     JSThreadState *ts = js_get_thread_state(rt);
     JSOSRWHandler *rh;
-    int fd;
+    int32_t fd;
     JSValueConst func;
 
     if (JS_ToInt32(ctx, &fd, argv[0]))
@@ -2403,7 +2414,7 @@ static JSValue js_os_signal(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-#if !defined(_WIN32) && !defined(__wasi__)
+#if !defined(_WIN32) && !defined(__wasi__) && !defined(__PSP__)
 static JSValue js_os_cputime(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
@@ -2828,7 +2839,20 @@ int js_std_poll_io(JSContext *ctx, int timeout_ms)
         return -2;
     return ret;
 }
-#else // !defined(_WIN32)
+#elif defined(__PSP__)
+static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
+{
+    return -1; /* no poll support on PSP */
+}
+static int js_os_poll(JSContext *ctx)
+{
+    return js_os_poll_internal(ctx, -1, JS_OS_POLL_RUN_TIMERS);
+}
+int js_std_poll_io(JSContext *ctx, int timeout_ms)
+{
+    return js_os_poll_internal(ctx, timeout_ms, 0);
+}
+#else // !defined(_WIN32) && !defined(__PSP__)
 static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -3038,7 +3062,7 @@ static JSValue js_os_chdir(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_mkdir(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    int mode, ret;
+    int32_t mode; int ret;
     const char *path;
 
     if (argc >= 2) {
@@ -3316,6 +3340,8 @@ static JSValue js_os_utimes(JSContext *ctx, JSValueConst this_val,
         times.modtime = mtime / 1000;
         ret = js_get_errno(_utime(path, &times));
     }
+#elif defined(__PSP__)
+    ret = -ENOSYS;
 #else
     {
         struct timeval times[2];
@@ -3394,7 +3420,7 @@ static JSValue js_os_realpath(JSContext *ctx, JSValueConst this_val,
 }
 #endif
 
-#if !defined(_WIN32) && !defined(__wasi__) && !(defined(__APPLE__) && (TARGET_OS_TV || TARGET_OS_WATCH))
+#if !defined(_WIN32) && !defined(__wasi__) && !defined(__PSP__) && !(defined(__APPLE__) && (TARGET_OS_TV || TARGET_OS_WATCH))
 static JSValue js_os_symlink(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
@@ -3556,7 +3582,7 @@ static int my_execvpe(const char *filename, char **argv, char **envp)
 
 static void (*js_os_exec_closefrom)(int);
 
-#if !defined(EMSCRIPTEN) && !defined(__wasi__)
+#if !defined(EMSCRIPTEN) && !defined(__wasi__) && !defined(__PSP__)
 
 static js_once_t js_os_exec_once = JS_ONCE_INIT;
 
@@ -3648,7 +3674,7 @@ static JSValue js_os_exec(JSContext *ctx, JSValueConst this_val,
             if (JS_IsException(val))
                 goto exception;
             if (!JS_IsUndefined(val)) {
-                int fd;
+                int32_t fd;
                 ret = JS_ToInt32(ctx, &fd, val);
                 JS_FreeValue(ctx, val);
                 if (ret)
@@ -3722,7 +3748,7 @@ static JSValue js_os_exec(JSContext *ctx, JSValueConst this_val,
 
     }
 
-#if !defined(EMSCRIPTEN) && !defined(__wasi__)
+#if !defined(EMSCRIPTEN) && !defined(__wasi__) && !defined(__PSP__)
     // should happen pre-fork because it calls dlsym()
     // and that's not an async-signal-safe function
     js_once(&js_os_exec_once, js_os_exec_once_init);
@@ -3826,7 +3852,7 @@ static JSValue js_os_getpid(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_waitpid(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    int pid, status, options, ret;
+    int32_t pid, options; int status, ret;
     JSValue obj;
 
     if (JS_ToInt32(ctx, &pid, argv[0]))
@@ -3874,7 +3900,7 @@ static JSValue js_os_pipe(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_kill(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    int pid, sig, ret;
+    int32_t pid, sig; int ret;
 
     if (JS_ToInt32(ctx, &pid, argv[0]))
         return JS_EXCEPTION;
@@ -3888,7 +3914,7 @@ static JSValue js_os_kill(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_dup(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
-    int fd, ret;
+    int32_t fd; int ret;
 
     if (JS_ToInt32(ctx, &fd, argv[0]))
         return JS_EXCEPTION;
@@ -3900,7 +3926,7 @@ static JSValue js_os_dup(JSContext *ctx, JSValueConst this_val,
 static JSValue js_os_dup2(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
-    int fd, fd2, ret;
+    int32_t fd, fd2; int ret;
 
     if (JS_ToInt32(ctx, &fd, argv[0]))
         return JS_EXCEPTION;
@@ -4409,7 +4435,7 @@ static const JSCFunctionListEntry js_os_funcs[] = {
     JS_CFUNC_MAGIC_DEF("read", 4, js_os_read_write, 0 ),
     JS_CFUNC_MAGIC_DEF("write", 4, js_os_read_write, 1 ),
     JS_CFUNC_DEF("isatty", 1, js_os_isatty ),
-#if !defined(__wasi__)
+#if !defined(__wasi__) && !defined(__PSP__)
     JS_CFUNC_DEF("ttyGetWinSize", 1, js_os_ttyGetWinSize ),
     JS_CFUNC_DEF("ttySetRaw", 1, js_os_ttySetRaw ),
 #endif
@@ -4424,7 +4450,7 @@ static const JSCFunctionListEntry js_os_funcs[] = {
     OS_FLAG(SIGILL),
     OS_FLAG(SIGSEGV),
     OS_FLAG(SIGTERM),
-#if !defined(_WIN32) && !defined(__wasi__)
+#if !defined(_WIN32) && !defined(__wasi__) && !defined(__PSP__)
     OS_FLAG(SIGQUIT),
     OS_FLAG(SIGPIPE),
     OS_FLAG(SIGALRM),
@@ -4474,7 +4500,7 @@ static const JSCFunctionListEntry js_os_funcs[] = {
 #if !defined(__wasi__)
     JS_CFUNC_DEF("realpath", 1, js_os_realpath ),
 #endif
-#if !defined(_WIN32) && !defined(__wasi__) && !(defined(__APPLE__) && (TARGET_OS_TV || TARGET_OS_WATCH))
+#if !defined(_WIN32) && !defined(__wasi__) && !defined(__PSP__) && !(defined(__APPLE__) && (TARGET_OS_TV || TARGET_OS_WATCH))
     JS_CFUNC_MAGIC_DEF("lstat", 1, js_os_stat, 1 ),
     JS_CFUNC_DEF("symlink", 2, js_os_symlink ),
     JS_CFUNC_DEF("readlink", 1, js_os_readlink ),
@@ -4969,7 +4995,7 @@ static JSValue js_bjson_read(JSContext *ctx, JSValueConst this_val,
     uint64_t pos, len;
     JSValue obj;
     size_t size;
-    int flags;
+    int32_t flags;
 
     if (JS_ToIndex(ctx, &pos, argv[1]))
         return JS_EXCEPTION;
@@ -4993,7 +5019,7 @@ static JSValue js_bjson_write(JSContext *ctx, JSValueConst this_val,
     size_t len;
     uint8_t *buf;
     JSValue array;
-    int flags;
+    int32_t flags;
 
     if (JS_ToInt32(ctx, &flags, argv[1]))
         return JS_EXCEPTION;
