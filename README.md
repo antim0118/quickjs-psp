@@ -25,6 +25,11 @@ make
 
 Then check for `libqjs.a` and `libqjs-libc.a` files in `build/` folder.
 
+## Download build
+1. Go to [Actions tab](https://github.com/antim0118/quickjs-psp/actions?query=workflow%3Abuild).
+2. Open latest build.
+3. Download `libs` artifact in *Artifacts*.
+
 ## Authors
 
 [@bnoordhuis], [@saghul], and many more [contributors].
