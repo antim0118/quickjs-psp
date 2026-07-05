@@ -45,6 +45,6 @@ jobs:
       with:
         name: libs
         path: |
-          libqjs.a
-          libqjs-libc.a
+          build/libqjs.a
+          build/libqjs-libc.a
         retention-days: 90
