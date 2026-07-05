@@ -12,6 +12,19 @@ This project is a _fork_ of the [original QuickJS project] by Fabrice Bellard an
 Head over to the [project website] for instructions on how to get started and more
 documentation.
 
+## Building for PSP
+
+Type in console:
+
+```bash
+mkdir build
+cd build
+psp-cmake ..
+make
+```
+
+Then check for `libqjs.a` and `libqjs-libc.a` files in `build/` folder.
+
 ## Authors
 
 [@bnoordhuis], [@saghul], and many more [contributors].
