@@ -1399,6 +1399,18 @@ static JSValue js_std_printf(JSContext *ctx, JSValueConst this_val,
     return js_printf_internal(ctx, argc, argv, stdout);
 }
 
+static JSValue js_std_runLoop(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    return JS_NewBool(ctx, js_std_loop(ctx));
+}
+
+static JSValue js_std_runLoopOnce(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    return JS_NewInt32(ctx, js_std_loop_once(ctx));
+}
+
 static FILE *js_std_file_get(JSContext *ctx, JSValueConst obj)
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -1950,6 +1962,8 @@ static const JSCFunctionListEntry js_std_funcs[] = {
     JS_CFUNC_MAGIC_DEF("puts", 1, js_std_file_puts, 0 ),
     JS_CFUNC_DEF("printf", 1, js_std_printf ),
     JS_CFUNC_DEF("sprintf", 1, js_std_sprintf ),
+    JS_CFUNC_DEF("runLoop", 0, js_std_runLoop ),
+    JS_CFUNC_DEF("runLoopOnce", 0, js_std_runLoopOnce ),
     JS_PROP_INT32_DEF("SEEK_SET", SEEK_SET, JS_PROP_CONFIGURABLE ),
     JS_PROP_INT32_DEF("SEEK_CUR", SEEK_CUR, JS_PROP_CONFIGURABLE ),
     JS_PROP_INT32_DEF("SEEK_END", SEEK_END, JS_PROP_CONFIGURABLE ),
@@ -2842,15 +2856,33 @@ int js_std_poll_io(JSContext *ctx, int timeout_ms)
 #elif defined(__PSP__)
 static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
 {
-    return -1; /* no poll support on PSP */
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    JSThreadState *ts = js_get_thread_state(rt);
+    int min_delay = timeout_ms;
+
+    if (flags & JS_OS_POLL_RUN_TIMERS) {
+        if (js_os_run_timers(rt, ctx, ts, &min_delay))
+            return -1;
+        if (min_delay == 0)
+            return 0; // expired timer
+        if (min_delay < 0)
+            if (list_empty(&ts->os_rw_handlers) && list_empty(&ts->port_list))
+                return -1; /* no more events */
+    }
 }
 static int js_os_poll(JSContext *ctx)
 {
-    return js_os_poll_internal(ctx, -1, JS_OS_POLL_RUN_TIMERS);
+    return js_os_poll_internal(ctx, -1,
+        // JS_OS_POLL_RUN_TIMERS | JS_OS_POLL_WORKERS | JS_OS_POLL_SIGNALS);
+        JS_OS_POLL_RUN_TIMERS);
 }
 int js_std_poll_io(JSContext *ctx, int timeout_ms)
 {
-    return js_os_poll_internal(ctx, timeout_ms, 0);
+    int ret = js_os_poll_internal(ctx, timeout_ms, 0);
+    /* map return codes: -1 on error stays -1, negative from handler becomes -2 */
+    if (ret < -1)
+        return -2;
+    return ret;
 }
 #else // !defined(_WIN32) && !defined(__PSP__)
 static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
