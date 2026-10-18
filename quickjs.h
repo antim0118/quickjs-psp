@@ -160,7 +160,6 @@ extern "C" {
 typedef struct JSRuntime JSRuntime;
 typedef struct JSContext JSContext;
 typedef struct JSObject JSObject;
-typedef struct JSClass JSClass;
 typedef uint32_t JSClassID;
 typedef uint32_t JSAtom;
 
@@ -584,7 +583,6 @@ JS_EXTERN void *js_malloc(JSContext *ctx, size_t size);
 JS_EXTERN void js_free(JSContext *ctx, void *ptr);
 JS_EXTERN void *js_realloc(JSContext *ctx, void *ptr, size_t size);
 JS_EXTERN size_t js_malloc_usable_size(JSContext *ctx, const void *ptr);
-JS_EXTERN void *js_realloc2(JSContext *ctx, void *ptr, size_t size, size_t *pslack);
 JS_EXTERN void *js_mallocz(JSContext *ctx, size_t size);
 JS_EXTERN char *js_strdup(JSContext *ctx, const char *str);
 JS_EXTERN char *js_strndup(JSContext *ctx, const char *s, size_t n);
@@ -979,6 +977,8 @@ JS_EXTERN JSValue JS_GetPropertyInt64(JSContext *ctx, JSValueConst this_obj,
                                       int64_t idx);
 JS_EXTERN JSValue JS_GetPropertyStr(JSContext *ctx, JSValueConst this_obj,
                                     const char *prop);
+JS_EXTERN JSValue JS_GetPropertyValue(JSContext *ctx, JSValueConst this_obj,
+                                      JSValue prop);
 
 JS_EXTERN int JS_SetProperty(JSContext *ctx, JSValueConst this_obj,
                              JSAtom prop, JSValue val);
@@ -988,6 +988,9 @@ JS_EXTERN int JS_SetPropertyInt64(JSContext *ctx, JSValueConst this_obj,
                                   int64_t idx, JSValue val);
 JS_EXTERN int JS_SetPropertyStr(JSContext *ctx, JSValueConst this_obj,
                                 const char *prop, JSValue val);
+// |flags| is a mix of JS_PROP_* values; when in doubt use JS_PROP_C_W_E
+JS_EXTERN int JS_SetPropertyValue(JSContext *ctx, JSValueConst this_obj,
+                                  JSValue prop, JSValue val, int flags);
 JS_EXTERN int JS_HasProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop);
 JS_EXTERN int JS_IsExtensible(JSContext *ctx, JSValueConst obj);
 JS_EXTERN int JS_PreventExtensions(JSContext *ctx, JSValueConst obj);
@@ -1070,10 +1073,24 @@ JS_EXTERN JSValue JS_ParseJSON(JSContext *ctx, const char *buf, size_t buf_len,
 JS_EXTERN JSValue JS_JSONStringify(JSContext *ctx, JSValueConst obj,
                                    JSValueConst replacer, JSValueConst space0);
 
-typedef void JSFreeArrayBufferDataFunc(JSRuntime *rt, void *opaque, void *ptr);
+/* Manages the backing memory of an externally created ArrayBuffer.
+   When 'size' is zero, 'ptr' must be freed and NULL returned. Otherwise the
+   block must be resized to 'size' bytes and the new pointer returned, or NULL
+   if that is not possible, indicating a memory error, in which case 'ptr' must
+   stay valid and the ArrayBuffer keeps its current size. */
+typedef void *JSReallocArrayBufferDataFunc(JSRuntime *rt, void *opaque,
+                                           void *ptr, size_t size);
+/* Creates an ArrayBuffer backed by 'buf'. Pass a zero 'max_len' for a regular,
+   fixed length ArrayBuffer; a non-zero 'max_len' makes it resizable and is its
+   maxByteLength. 'realloc_func' may be NULL if the memory must not be managed
+   by quickjs at all; such an ArrayBuffer can neither be resized nor
+   transferred to a different length. It is required for resizable
+   ArrayBuffers, except for SharedArrayBuffers: those commit their maximum size
+   upfront and therefore need 'buf' to be at least 'max_len' bytes big. */
 JS_EXTERN JSValue JS_NewArrayBuffer(JSContext *ctx, uint8_t *buf, size_t len,
-                                    JSFreeArrayBufferDataFunc *free_func, void *opaque,
-                                    bool is_shared);
+                                    size_t max_len,
+                                    JSReallocArrayBufferDataFunc *realloc_func,
+                                    void *opaque, bool is_shared);
 JS_EXTERN JSValue JS_NewArrayBufferCopy(JSContext *ctx, const uint8_t *buf, size_t len);
 JS_EXTERN void JS_DetachArrayBuffer(JSContext *ctx, JSValueConst obj);
 JS_EXTERN uint8_t *JS_GetArrayBuffer(JSContext *ctx, size_t *psize, JSValueConst obj);
@@ -1106,8 +1123,8 @@ JS_EXTERN JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
                                          size_t *pbyte_length,
                                          size_t *pbytes_per_element);
 JS_EXTERN JSValue JS_NewUint8Array(JSContext *ctx, uint8_t *buf, size_t len,
-                                   JSFreeArrayBufferDataFunc *free_func, void *opaque,
-                                   bool is_shared);
+                                   JSReallocArrayBufferDataFunc *realloc_func,
+                                   void *opaque, bool is_shared);
 /* returns -1 if not a typed array otherwise return a JSTypedArrayEnum value */
 JS_EXTERN int JS_GetTypedArrayType(JSValueConst obj);
 JS_EXTERN JSValue JS_NewUint8ArrayCopy(JSContext *ctx, const uint8_t *buf, size_t len);
@@ -1128,13 +1145,20 @@ typedef enum JSPromiseStateEnum {
 } JSPromiseStateEnum;
 
 JS_EXTERN JSValue JS_NewPromiseCapability(JSContext *ctx, JSValue *resolving_funcs);
+JS_EXTERN JSValue JS_PromiseThen(JSContext *ctx, JSValueConst promise,
+                                JSValueConst on_fulfilled,
+                                JSValueConst on_rejected);
 JS_EXTERN JSPromiseStateEnum JS_PromiseState(JSContext *ctx,
                                              JSValueConst promise);
 JS_EXTERN JSValue JS_PromiseResult(JSContext *ctx, JSValueConst promise);
 JS_EXTERN bool JS_IsPromise(JSValueConst val);
+JS_EXTERN void JS_PromiseMarkAsHandled(JSContext *ctx, JSValueConst promise);
 JS_EXTERN JSValue JS_NewSettledPromise(JSContext *ctx, bool is_reject, JSValueConst value);
 
+// a symbol that is visible to JavaScript code
 JS_EXTERN JSValue JS_NewSymbol(JSContext *ctx, const char *description, bool is_global);
+// a symbol that is only visible to C code
+JS_EXTERN JSValue JS_NewPrivateSymbol(JSContext *ctx, const char *description);
 
 typedef enum JSPromiseHookType {
     JS_PROMISE_HOOK_INIT,     // emitted when a new promise is created
@@ -1396,6 +1420,7 @@ typedef struct JSCFunctionListEntry {
 #define JS_CGETSET_DEF(name, fgetter, fsetter) { name, JS_PROP_CONFIGURABLE, JS_DEF_CGETSET, 0, { .getset = { .get = { .getter = fgetter }, .set = { .setter = fsetter } } } }
 #define JS_CGETSET_DEF2(name, fgetter, fsetter, prop_flags) { name, prop_flags, JS_DEF_CGETSET, 0, { .getset = { .get = { .getter = fgetter }, .set = { .setter = fsetter } } } }
 #define JS_CGETSET_MAGIC_DEF(name, fgetter, fsetter, magic) { name, JS_PROP_CONFIGURABLE, JS_DEF_CGETSET_MAGIC, magic, { .getset = { .get = { .getter_magic = fgetter }, .set = { .setter_magic = fsetter } } } }
+#define JS_CGETSET_MAGIC_DEF2(name, fgetter, fsetter, magic, prop_flags) { name, prop_flags, JS_DEF_CGETSET_MAGIC, magic, { .getset = { .get = { .getter_magic = fgetter }, .set = { .setter_magic = fsetter } } } }
 #define JS_PROP_STRING_DEF(name, cstr, prop_flags) { name, prop_flags, JS_DEF_PROP_STRING, 0, { .str = cstr } }
 #define JS_PROP_INT32_DEF(name, val, prop_flags) { name, prop_flags, JS_DEF_PROP_INT32, 0, { .i32 = val } }
 #define JS_PROP_INT64_DEF(name, val, prop_flags) { name, prop_flags, JS_DEF_PROP_INT64, 0, { .i64 = val } }
@@ -1431,8 +1456,8 @@ JS_EXTERN int JS_SetModuleExportList(JSContext *ctx, JSModuleDef *m,
 /* Version */
 
 #define QJS_VERSION_MAJOR 0
-#define QJS_VERSION_MINOR 15
-#define QJS_VERSION_PATCH 1
+#define QJS_VERSION_MINOR 17
+#define QJS_VERSION_PATCH 0
 #define QJS_VERSION_SUFFIX ""
 
 JS_EXTERN const char* JS_GetVersion(void);
